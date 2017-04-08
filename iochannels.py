@@ -596,8 +596,8 @@ class ColorCLIChannel(CLIChannel):
         else:
             # The default functionality will just fall back to boring ol' black-and-white
             self.print()
-            self.error("Colorama module not found!")
-            self.error("{} will be in boring ol' black-and-white",
+            self.error("==> Colorama module not found!")
+            self.error("==> {} will be in boring ol' black-and-white",
                        application_name_for_error or "Output")
             self.print()
 
