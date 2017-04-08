@@ -12,8 +12,11 @@ Licensed under the MIT License. For more, see the LICENSE file.
 Author: Jake Hartz <jake@hartz.io>
 """
 
+import contextlib
 import io
+import queue
 import shutil
+import sys
 import threading
 from enum import Enum
 from typing import Callable, List, Optional, Tuple
@@ -156,17 +159,19 @@ class Channel:
     def __init__(self, *delegates: Log):
         self._delegates = delegates
         self._lock = threading.Lock()
-
-    def _in(self, prompt_msg: Optional[Msg] = None, autocomplete_choices: List[str] = None) -> str:
-        """
-        See Channel::input. This method should be overridden in subclasses to do the actual input
-        operation.
-        """
-        raise NotImplementedError()
+        self._cv = threading.Condition(self._lock)
+        self._line = []
 
     def _out(self, msg: Msg):
         """
         See Channel::output. This method should be overridden in subclasses to do the actual output
+        operation.
+        """
+        raise NotImplementedError()
+
+    def _in(self, prompt_msg: Optional[Msg] = None, autocomplete_choices: List[str] = None) -> str:
+        """
+        See Channel::input. This method should be overridden in subclasses to do the actual input
         operation.
         """
         raise NotImplementedError()
@@ -181,12 +186,87 @@ class Channel:
         """
         return None, None
 
-    def _message_delegates(self, msg: Msg):
-        """
-        Output a message to all delegates.
-        """
+    @contextlib.contextmanager
+    def _wait_in_line(self):
+        me = threading.current_thread()
+        with self._lock:
+            self._line.append(me)
+            self._cv.wait_for(lambda: self._line[0] == me)
+            assert self._line.pop(0) == me
+            yield
+            self._cv.notify_all()
+
+    def _message_delegates_nosync(self, msg: Msg):
         for delegate in self._delegates:
             delegate.output(msg)
+
+    def _output_nosync(self, msg: Msg):
+        """
+        See Channel::output.
+        """
+        self._out(msg)
+        self._message_delegates_nosync(msg)
+
+    def _input_nosync(self, prompt: Optional[str] = None,
+                      autocomplete_choices: List[str] = None) -> str:
+        """
+        See Channel::input.
+        """
+        msg = None
+        if prompt:
+            msg = Msg(end=" ").add(Msg.PartType.PROMPT_QUESTION, prompt)
+            self._message_delegates_nosync(msg)
+        line = self._in(msg, autocomplete_choices).rstrip()
+        self._message_delegates_nosync(Msg().add(Msg.PartType.PROMPT_ANSWER, line))
+        return line
+
+    def _prompt_nosync(self, prompt: str, choices: List[str], default_choice: Optional[str] = None,
+                       show_choices: bool = True, hidden_choices: bool = None) -> str:
+        """
+        See Channel::prompt.
+        """
+        our_choices = []
+        user_choices = ""
+        has_empty_choice = False
+
+        for choice in choices:
+            if choice == "":
+                has_empty_choice = True
+            else:
+                our_choices.append(choice.lower())
+                if hidden_choices is None or choice not in hidden_choices:
+                    user_choices += choice + "/"
+
+        if has_empty_choice:
+            # We add in this choice last
+            user_choices += "Enter"
+        else:
+            # Strip trailing slash
+            user_choices = user_choices[:-1]
+
+        msg = prompt
+        if show_choices:
+            msg += " (%s)" % user_choices
+        msg += ":"
+
+        while True:
+            choice = self._input_nosync(msg).strip().lower()
+            if choice == "" and has_empty_choice:
+                return ""
+            elif choice == "" and not has_empty_choice and default_choice is not None:
+                return default_choice.lower()
+            elif choice in our_choices:
+                return choice
+            else:
+                self._output_nosync(Msg().error("Learn how to read, dumbass. `{}' ain't a choice!",
+                                                choice))
+
+    def output(self, msg: Msg):
+        """
+        Print a message to the user.
+        """
+        with self._wait_in_line():
+            self._output_nosync(msg)
 
     def input(self, prompt: Optional[str] = None, autocomplete_choices: List[str] = None) -> str:
         """
@@ -199,22 +279,58 @@ class Channel:
         :param autocomplete_choices: A list of choices to use for autocompletion (if implemented).
         :return: The text entered by the user.
         """
-        with self._lock:
-            msg = None
-            if prompt:
-                msg = Msg(end=" ").add(Msg.PartType.PROMPT_QUESTION, prompt)
-                self._message_delegates(msg)
-            line = self._in(msg, autocomplete_choices).rstrip()
-            self._message_delegates(Msg().add(Msg.PartType.PROMPT_ANSWER, line))
-            return line
+        with self._wait_in_line():
+            return self._input_nosync(prompt, autocomplete_choices)
 
-    def output(self, msg: Msg):
+    @contextlib.contextmanager
+    def blocking_input(self):
         """
-        Print a message to the user.
+        Repeatedly get input from the user, blocking all other synchronous I/O until we are done.
+        This is useful if you want to get multiple lines of input from the user, not allowing any
+        interruptions until some condition is met.
         """
-        with self._lock:
-            self._out(msg)
-            self._message_delegates(msg)
+        with self._wait_in_line():
+            yield self._input_nosync
+
+    def prompt(self, prompt: str, choices: List[str], default_choice: Optional[str] = None,
+               show_choices: bool = True, hidden_choices: bool = None) -> str:
+        """
+        Ask the user a question, returning their choice.
+
+        :param prompt: The message to prompt the user with.
+        :param choices: The list of valid choices (possibly including "").
+        :param default_choice: The default choice from choices (only used if "" is not in choices).
+            For your own sanity, make this lowercase.
+        :param show_choices: Whether to show the user the list of choices.
+        :param hidden_choices: If show_choices is True, this can be a list of choices to hide from
+            the user at the prompt.
+        :return: An element of choices chosen by the user (lowercased).
+        """
+        with self._wait_in_line():
+            return self._prompt_nosync(prompt, choices, default_choice, show_choices,
+                                       hidden_choices)
+
+    def output_then_input(self, msg: Msg, prompt: Optional[str] = None,
+                          autocomplete_choices: List[str] = None) -> str:
+        """
+        Print a message to the user, then ask the user for a line of input. See Channel::output and
+        Channel::input for details.)
+        """
+        with self._wait_in_line():
+            self._output_nosync(msg)
+            return self._input_nosync(prompt, autocomplete_choices)
+
+    def output_then_prompt(self, msg: Msg, prompt: str, choices: List[str],
+                           default_choice: Optional[str] = None, show_choices: bool = True,
+                           hidden_choices: bool = None) -> str:
+        """
+        Print a message to the user, then ask them a question, returning their choice. See
+        Channel::output and Channel::prompt for details.
+        """
+        with self._wait_in_line():
+            self._output_nosync(msg)
+            return self._prompt_nosync(prompt, choices, default_choice, show_choices,
+                                       hidden_choices)
 
     def output_list(self, msgs: List[Msg], prefix: str = "  "):
         """
@@ -233,9 +349,10 @@ class Channel:
 
         num_cols, _ = self.get_window_size()
         if not use_cols or not num_cols:
-            for msg in msgs:
-                self.output(msg)
-                self.print()
+            with self._wait_in_line():
+                for msg in msgs:
+                    self._output_nosync(msg)
+                    self._output_nosync(Msg().print())
             return
 
         # Keep trying, until we can fit everything into "num_rows" rows, or each message is in its
@@ -252,15 +369,17 @@ class Channel:
                 break
 
         # Transform from column-major to row-major for printing
-        for row_index in range(num_rows):
-            for col_index in range(len(cols)):
-                if row_index < len(cols[col_index]):
-                    msg = cols[col_index][row_index]
-                    self.print(prefix, end="")
-                    self.output(msg)
-                    if len(msg) < col_lengths[col_index]:
-                        self.print(" " * (col_lengths[col_index] - len(msg)), end="")
-            self.print()
+        with self._wait_in_line():
+            for row_index in range(num_rows):
+                for col_index in range(len(cols)):
+                    if row_index < len(cols[col_index]):
+                        msg = cols[col_index][row_index]
+                        self._output_nosync(Msg(end="").print(prefix))
+                        self._output_nosync(msg)
+                        if len(msg) < col_lengths[col_index]:
+                            self._output_nosync(
+                                Msg(end="").print(" " * (col_lengths[col_index] - len(msg))))
+                self._output_nosync(Msg().print())
 
     def print(self, *args, **kwargs):
         """Shortcut for output(Msg(...).print(...))"""
@@ -270,7 +389,7 @@ class Channel:
         """
         Print a bordered message.
         """
-        message = base.format(args)
+        message = base.format(*args)
         cols, _ = self.get_window_size()
         lines = []
         for line in message.splitlines():
@@ -279,16 +398,18 @@ class Channel:
             else:
                 while line:
                     lines.append(line[:cols-4])
-                    line = line[:cols-4]
+                    line = line[cols-4:]
         max_len = max((len(line) for line in lines), default=0)
-        if not cols:
+        if cols:
+            cols = min(cols, max_len + 4)
+        else:
             cols = max_len + 4
 
         available_width = cols - 4
         start_padding = (available_width - max_len) // 2
         line_width = available_width - start_padding
 
-        msg = Msg()
+        msg = Msg(sep="\n")
         msg.add(type, "{}", "*" * cols)
         for line in lines:
             msg.add(type, "* {}{} *", " " * start_padding, line.ljust(line_width))
@@ -338,55 +459,6 @@ class Channel:
     def bg_meh(self, *args, **kwargs):
         """Shortcut for output(Msg(...).bg_meh(...))"""
         self.output(Msg(**kwargs).bg_meh(*args))
-
-    def prompt(self, prompt: str, choices: List[str], default_choice: Optional[str] = None,
-               show_choices: bool = True, hidden_choices: bool = None) -> str:
-        """
-        Ask the user a question, returning their choice.
-
-        :param prompt: The message to prompt the user with.
-        :param choices: The list of valid choices (possibly including "").
-        :param default_choice: The default choice from choices (only used if "" is not in choices).
-            For your own sanity, make this lowercase.
-        :param show_choices: Whether to show the user the list of choices.
-        :param hidden_choices: If show_choices is True, this can be a list of choices to hide from
-            the user at the prompt.
-        :return: An element of choices chosen by the user (lowercased).
-        """
-        our_choices = []
-        user_choices = ""
-        has_empty_choice = False
-
-        for choice in choices:
-            if choice == "":
-                has_empty_choice = True
-            else:
-                our_choices.append(choice.lower())
-                if hidden_choices is None or choice not in hidden_choices:
-                    user_choices += choice + "/"
-
-        if has_empty_choice:
-            # We add in this choice last
-            user_choices += "Enter"
-        else:
-            # Strip trailing slash
-            user_choices = user_choices[:-1]
-
-        msg = prompt
-        if show_choices:
-            msg += " (%s)" % user_choices
-        msg += ": "
-
-        while True:
-            choice = self.input(msg).strip().lower()
-            if choice == "" and has_empty_choice:
-                return ""
-            elif choice == "" and not has_empty_choice and default_choice is not None:
-                return default_choice.lower()
-            elif choice in our_choices:
-                return choice
-            else:
-                self.error("Learn how to read, dumbass. `{}' ain't a choice!", choice)
 
 
 class TextMemoryLog(MemoryLog):
@@ -457,6 +529,10 @@ class CLIChannel(Channel):
         if self._readline_completer:
             self._readline_completer.set_options(options)
 
+    def _out(self, msg: Msg):
+        print(self._msg_to_string(msg), end="")
+        sys.stdout.flush()
+
     def _in(self, prompt_msg: Optional[Msg] = None, autocomplete_choices: List[str] = None) -> str:
         if autocomplete_choices is not None:
             self._set_options(autocomplete_choices)
@@ -471,9 +547,6 @@ class CLIChannel(Channel):
 
         self._set_options(None)
         return line
-
-    def _out(self, msg: Msg):
-        print(self._msg_to_string(msg), end="")
 
     def _msg_to_string(self, msg: Msg) -> str:
         return msg.get_string()
