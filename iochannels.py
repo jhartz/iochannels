@@ -277,7 +277,7 @@ class Channel:
 
         :param prompt: The message to prompt the user with.
         :param autocomplete_choices: A list of choices to use for autocompletion (if implemented).
-        :return: The text entered by the user.
+        :return: The text entered by the user, without a trailing newline.
         """
         with self._wait_in_line():
             return self._input_nosync(prompt, autocomplete_choices)
