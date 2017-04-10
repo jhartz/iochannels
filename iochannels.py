@@ -169,7 +169,8 @@ class Channel:
         """
         raise NotImplementedError()
 
-    def _in(self, prompt_msg: Optional[Msg] = None, autocomplete_choices: List[str] = None) -> str:
+    def _in(self, prompt_msg: Optional[Msg] = None,
+            autocomplete_choices: List[str] = None) -> Optional[str]:
         """
         See Channel::input. This method should be overridden in subclasses to do the actual input
         operation.
@@ -208,7 +209,7 @@ class Channel:
         self._message_delegates_nosync(msg)
 
     def _input_nosync(self, prompt: Optional[str] = None,
-                      autocomplete_choices: List[str] = None) -> str:
+                      autocomplete_choices: List[str] = None) -> Optional[str]:
         """
         See Channel::input.
         """
@@ -216,8 +217,11 @@ class Channel:
         if prompt:
             msg = Msg(end=" ").add(Msg.PartType.PROMPT_QUESTION, prompt)
             self._message_delegates_nosync(msg)
-        line = self._in(msg, autocomplete_choices).rstrip()
-        self._message_delegates_nosync(Msg().add(Msg.PartType.PROMPT_ANSWER, line))
+        line = self._in(msg, autocomplete_choices)
+        if line is None:
+            self._message_delegates_nosync(Msg().print())
+        else:
+            self._message_delegates_nosync(Msg().add(Msg.PartType.PROMPT_ANSWER, line))
         return line
 
     def _prompt_nosync(self, prompt: str, choices: List[str], default_choice: Optional[str] = None,
@@ -250,16 +254,20 @@ class Channel:
         msg += ":"
 
         while True:
-            choice = self._input_nosync(msg).strip().lower()
-            if choice == "" and has_empty_choice:
-                return ""
-            elif choice == "" and not has_empty_choice and default_choice is not None:
-                return default_choice.lower()
-            elif choice in our_choices:
-                return choice
+            choice = self._input_nosync(msg)
+            if choice is None:
+                self._output_nosync(Msg().error("Ya gotta pick something"))
             else:
-                self._output_nosync(Msg().error("Learn how to read, dumbass. `{}' ain't a choice!",
-                                                choice))
+                choice = choice.strip().lower()
+                if choice == "" and has_empty_choice:
+                    return ""
+                elif choice == "" and not has_empty_choice and default_choice is not None:
+                    return default_choice.lower()
+                elif choice in our_choices:
+                    return choice
+                else:
+                    self._output_nosync(Msg().error(
+                        "Learn how to read, dumbass. `{}' ain't a choice!", choice))
 
     def output(self, msg: Msg):
         """
@@ -268,7 +276,8 @@ class Channel:
         with self._wait_in_line():
             self._output_nosync(msg)
 
-    def input(self, prompt: Optional[str] = None, autocomplete_choices: List[str] = None) -> str:
+    def input(self, prompt: Optional[str] = None,
+              autocomplete_choices: List[str] = None) -> Optional[str]:
         """
         Ask the user for a line of input. It is better to specify a "prompt" here, rather than
         printing the prompt message without a trailing newline and then calling this method (the
@@ -277,7 +286,8 @@ class Channel:
 
         :param prompt: The message to prompt the user with.
         :param autocomplete_choices: A list of choices to use for autocompletion (if implemented).
-        :return: The text entered by the user, without a trailing newline.
+        :return: The text entered by the user, without a trailing newline, or None if they
+            cancelled.
         """
         with self._wait_in_line():
             return self._input_nosync(prompt, autocomplete_choices)
@@ -311,7 +321,7 @@ class Channel:
                                        hidden_choices)
 
     def output_then_input(self, msg: Msg, prompt: Optional[str] = None,
-                          autocomplete_choices: List[str] = None) -> str:
+                          autocomplete_choices: List[str] = None) -> Optional[str]:
         """
         Print a message to the user, then ask the user for a line of input. See Channel::output and
         Channel::input for details.)
@@ -533,7 +543,8 @@ class CLIChannel(Channel):
         print(self._msg_to_string(msg), end="")
         sys.stdout.flush()
 
-    def _in(self, prompt_msg: Optional[Msg] = None, autocomplete_choices: List[str] = None) -> str:
+    def _in(self, prompt_msg: Optional[Msg] = None,
+            autocomplete_choices: List[str] = None) -> Optional[str]:
         if autocomplete_choices is not None:
             self._set_options(autocomplete_choices)
 
@@ -543,7 +554,7 @@ class CLIChannel(Channel):
             else:
                 line = input()
         except EOFError:
-            line = ""
+            line = None
 
         self._set_options(None)
         return line
