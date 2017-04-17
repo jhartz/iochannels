@@ -292,16 +292,6 @@ class Channel:
         with self._wait_in_line():
             return self._input_nosync(prompt, autocomplete_choices)
 
-    @contextlib.contextmanager
-    def blocking_input(self):
-        """
-        Repeatedly get input from the user, blocking all other synchronous I/O until we are done.
-        This is useful if you want to get multiple lines of input from the user, not allowing any
-        interruptions until some condition is met.
-        """
-        with self._wait_in_line():
-            yield self._input_nosync
-
     def prompt(self, prompt: str, choices: List[str], default_choice: Optional[str] = None,
                show_choices: bool = True, hidden_choices: bool = None) -> str:
         """
@@ -320,27 +310,25 @@ class Channel:
             return self._prompt_nosync(prompt, choices, default_choice, show_choices,
                                        hidden_choices)
 
-    def output_then_input(self, msg: Msg, prompt: Optional[str] = None,
-                          autocomplete_choices: List[str] = None) -> Optional[str]:
+    @contextlib.contextmanager
+    def blocking_io(self):
         """
-        Print a message to the user, then ask the user for a line of input. See Channel::output and
-        Channel::input for details.)
-        """
-        with self._wait_in_line():
-            self._output_nosync(msg)
-            return self._input_nosync(prompt, autocomplete_choices)
+        Block all synchronous I/O, only allowing input and output in one place. This is useful if
+        you want to execute a series of I/O calls in sequence, without being interrupted.
 
-    def output_then_prompt(self, msg: Msg, prompt: str, choices: List[str],
-                           default_choice: Optional[str] = None, show_choices: bool = True,
-                           hidden_choices: bool = None) -> str:
-        """
-        Print a message to the user, then ask them a question, returning their choice. See
-        Channel::output and Channel::prompt for details.
+        This function should be used with the "with" statement, like so:
+
+            with channel.blocking_io() as (output_func, input_func, prompt_func):
+                # ...
+
+        Then, to do output, input, or prompting, use the context manager's functions. For the
+        usage of these functions, see Channel::output, Channel::input, and Channel::prompt.
+
+        WARNING: Calling the channel's normal I/O functions within the context of this function
+        will cause a deadlock.
         """
         with self._wait_in_line():
-            self._output_nosync(msg)
-            return self._prompt_nosync(prompt, choices, default_choice, show_choices,
-                                       hidden_choices)
+            yield (self._output_nosync, self._input_nosync, self._prompt_nosync)
 
     def output_list(self, msgs: List[Msg], prefix: str = "  "):
         """
