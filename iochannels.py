@@ -5,7 +5,7 @@ The functionality in IOChannels is based on 2 types of classes:
 - Log: handles output logging, but cannot get input from the user (think like a logfile);
 - Channel: shows output to the user and can get input from the user (like using print()/input())
 
-Both of these output "Msg" objects.
+Both of these have methods accepting "Msg" objects to perform output.
 
 Licensed under the MIT License. For more, see the LICENSE file.
 
