@@ -530,15 +530,18 @@ class HTMLMemoryLog(MemoryLog):
 
 class CLIChannel(Channel):
     """
-    A Channel implementation that reads from stdin and writes to stdout, using "readline" for
-    autocompletion if available.
+    A Channel implementation that reads from stdin and writes to stdout, optionally using
+    "readline" for autocompletion if available.
     """
 
-    def __init__(self, *delegates):
+    def __init__(self, *delegates, use_readline: bool = True):
         super().__init__(*delegates)
 
-        from support import readline_support
-        self._readline_completer = readline_support.global_readline_completer
+        if use_readline:
+            from support import readline_support
+            self._readline_completer = readline_support.global_readline_completer
+        else:
+            self._readline_completer = None
 
     def _set_options(self, options: Optional[List[str]]):
         if self._readline_completer:
@@ -589,8 +592,9 @@ class ColorCLIChannel(CLIChannel):
                            self._wrap_fg_color("WHITE", s),
                            self._colorama.Back.RESET)
 
-    def __init__(self, *delegates, application_name_for_error: Optional[str] = None):
-        super().__init__(*delegates)
+    def __init__(self, *delegates, use_readline: bool = True,
+                 application_name_for_error: Optional[str] = None):
+        super().__init__(*delegates, use_readline=use_readline)
 
         from support import colorama_support
         self._colorama = colorama_support.colorama
