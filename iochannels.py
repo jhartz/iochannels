@@ -14,12 +14,15 @@ Author: Jake Hartz <jake@hartz.io>
 
 import contextlib
 import io
-import queue
 import shutil
 import sys
 import threading
 from enum import Enum
 from typing import Callable, List, Optional, Tuple
+
+
+DEFAULT_BAD_CHOICE_MSG = "Invalid choice: {}"
+DEFAULT_EMPTY_CHOICE_MSG = "Choose one of: {}"
 
 
 class Msg:
@@ -225,7 +228,9 @@ class Channel:
         return line
 
     def _prompt_nosync(self, prompt: str, choices: List[str], default_choice: Optional[str] = None,
-                       show_choices: bool = True, hidden_choices: bool = None) -> str:
+                       show_choices: bool = True, hidden_choices: bool = None,
+                       bad_choice_msg: str = DEFAULT_BAD_CHOICE_MSG,
+                       empty_choice_msg: str = DEFAULT_EMPTY_CHOICE_MSG) -> str:
         """
         See Channel::prompt.
         """
@@ -256,7 +261,7 @@ class Channel:
         while True:
             choice = self._input_nosync(msg)
             if choice is None:
-                self._output_nosync(Msg().error("Ya gotta pick something"))
+                self._output_nosync(Msg().error(empty_choice_msg, user_choices))
             else:
                 choice = choice.strip().lower()
                 if choice == "" and has_empty_choice:
@@ -266,8 +271,7 @@ class Channel:
                 elif choice in our_choices:
                     return choice
                 else:
-                    self._output_nosync(Msg().error(
-                        "Learn how to read, dumbass. `{}' ain't a choice!", choice))
+                    self._output_nosync(Msg().error(bad_choice_msg, choice))
 
     def output(self, msg: Msg):
         """
@@ -293,7 +297,9 @@ class Channel:
             return self._input_nosync(prompt, autocomplete_choices)
 
     def prompt(self, prompt: str, choices: List[str], default_choice: Optional[str] = None,
-               show_choices: bool = True, hidden_choices: bool = None) -> str:
+               show_choices: bool = True, hidden_choices: bool = None,
+               bad_choice_msg: str = DEFAULT_BAD_CHOICE_MSG,
+               empty_choice_msg: str = DEFAULT_EMPTY_CHOICE_MSG) -> str:
         """
         Ask the user a question, returning their choice.
 
@@ -304,11 +310,17 @@ class Channel:
         :param show_choices: Whether to show the user the list of choices.
         :param hidden_choices: If show_choices is True, this can be a list of choices to hide from
             the user at the prompt.
+        :param bad_choice_msg: An error message to print when the user enters an invalid choice.
+            If a str.format placeholder is present (i.e. "{}"), it is replaced with the user's
+            choice.
+        :param empty_choice_msg: An error message to print when the user doesn't enter a choice,
+            and there is no default. If a str.format placeholder is present (i.e. "{}"), it is
+            replaced with the list of choices.
         :return: An element of choices chosen by the user (lowercased).
         """
         with self._wait_in_line():
             return self._prompt_nosync(prompt, choices, default_choice, show_choices,
-                                       hidden_choices)
+                                       hidden_choices, bad_choice_msg, empty_choice_msg)
 
     @contextlib.contextmanager
     def blocking_io(self):
