@@ -482,30 +482,35 @@ class TextMemoryLog(MemoryLog):
 
 class HTMLMemoryLog(MemoryLog):
     """
-    A MemoryLog implementation that generates an HTML log.
+    A MemoryLog implementation that generates an HTML log. It's expected that the HTML content will
+    be embedded inside <pre></pre> tags.
     """
 
     @staticmethod
     def _wrap_fg_color(color, s):
-        return '<span style="color: %s">%s</span>' % (color, s)
+        return '<span style="color: %s; font-weight: bold;">%s</span>' % (color, s)
 
     @staticmethod
     def _wrap_bg_color(color, s):
-        return '<span style="background-color: %s">%s</span>' % (color, s)
+        return '<span style="background-color: %s; font-weight: bold;">%s</span>' % (color, s)
+
+    @staticmethod
+    def _wrap_bold(s):
+        return '<b>%s</b>' % s
 
     @staticmethod
     def _wrap_italic(s):
         return '<i>%s</i>' % s
 
     _transforms_by_part_type = {
-        Msg.PartType.PROMPT_QUESTION: lambda s: HTMLMemoryLog._wrap_fg_color("cyan", s),
+        Msg.PartType.PROMPT_QUESTION: lambda s: HTMLMemoryLog._wrap_fg_color("#34E2E2", s),
         Msg.PartType.PROMPT_ANSWER:   lambda s: HTMLMemoryLog._wrap_italic(s),
 
         Msg.PartType.PRINT:    lambda s: s,
-        Msg.PartType.STATUS:   lambda s: HTMLMemoryLog._wrap_fg_color("green", s),
-        Msg.PartType.ERROR:    lambda s: HTMLMemoryLog._wrap_fg_color("red", s),
-        Msg.PartType.ACCENT:   lambda s: HTMLMemoryLog._wrap_fg_color("blue", s),
-        Msg.PartType.BRIGHT:   lambda s: s,
+        Msg.PartType.STATUS:   lambda s: HTMLMemoryLog._wrap_fg_color("#8AE234", s),
+        Msg.PartType.ERROR:    lambda s: HTMLMemoryLog._wrap_fg_color("#EF2929", s),
+        Msg.PartType.ACCENT:   lambda s: HTMLMemoryLog._wrap_fg_color("#729FCF", s),
+        Msg.PartType.BRIGHT:   lambda s: HTMLMemoryLog._wrap_bold(s),
         Msg.PartType.BG_HAPPY: lambda s: HTMLMemoryLog._wrap_bg_color("green", s),
         Msg.PartType.BG_SAD:   lambda s: HTMLMemoryLog._wrap_bg_color("red", s),
         Msg.PartType.BG_MEH:   lambda s: HTMLMemoryLog._wrap_bg_color("blue", s)
@@ -520,7 +525,7 @@ class HTMLMemoryLog(MemoryLog):
         html_part_str = HTMLMemoryLog._escape_html(part_str)
         if part_type is not None:
             html_part_str = HTMLMemoryLog._transforms_by_part_type[part_type](html_part_str)
-        return html_part_str.replace("\n", "<br>\n")
+        return html_part_str
 
 
 class CLIChannel(Channel):
