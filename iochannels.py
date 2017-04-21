@@ -471,10 +471,13 @@ class Channel:
                 self._output_nosync(Msg().error(empty_choice_msg, user_choices))
             else:
                 choice = choice.strip().lower()
-                if choice == "" and has_empty_choice:
-                    return ""
-                elif choice == "" and not has_empty_choice and default_choice is not None:
-                    return default_choice.lower()
+                if choice == "":
+                    if has_empty_choice:
+                        return ""
+                    elif default_choice is not None:
+                        return default_choice.lower()
+                    else:
+                        self._output_nosync(Msg().error(empty_choice_msg, user_choices))
                 elif choice in our_choices:
                     return choice
                 else:
@@ -712,6 +715,7 @@ class CLIChannel(Channel):
             else:
                 line = input()
         except EOFError:
+            print()
             line = None
 
         self._set_options(None)
