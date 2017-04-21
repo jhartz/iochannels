@@ -13,7 +13,6 @@ Author: Jake Hartz <jake@hartz.io>
 """
 
 import contextlib
-import io
 import shutil
 import sys
 import threading
@@ -42,6 +41,8 @@ class Msg:
         BG_HAPPY = 6
         BG_SAD = 7
         BG_MEH = 8
+
+    PartProcessor = Callable[[PartType, str], str]
 
     def __init__(self, sep: str = " ", end: str = "\n"):
         """
@@ -83,8 +84,7 @@ class Msg:
     def bg_meh(self, *args) -> "Msg":
         return self.add(Msg.PartType.BG_MEH, *args)
 
-    def get_string(self, part_processor: Optional[Callable[["Msg.PartType", str], str]] = None) \
-            -> str:
+    def get_string(self, part_processor: Optional[PartProcessor] = None) -> str:
         """
         Transform this message into a string representation.
 
@@ -95,7 +95,8 @@ class Msg:
         """
         if not part_processor:
             part_processor = lambda _, s: s
-        return self._sep.join(part_processor(*part) for part in self._parts) + self._end
+        return self._sep.join(part_processor(part_type, part_str)
+                              for part_type, part_str in self._parts) + self._end
 
     def __len__(self):
         """
@@ -104,66 +105,236 @@ class Msg:
         return len(self.get_string())
 
 
+class _HTMLTransforms:
+    """Helpers for html_part_processor"""
+
+    @staticmethod
+    def _wrap_fg_color(color, s):
+        return '<span style="color: %s; font-weight: bold;">%s</span>' % (color, s)
+
+    @staticmethod
+    def _wrap_bg_color(color, s):
+        return '<span style="background-color: %s; font-weight: bold;">%s</span>' % (color, s)
+
+    @staticmethod
+    def _wrap_bold(s):
+        return '<b>%s</b>' % s
+
+    @staticmethod
+    def _wrap_italic(s):
+        return '<i>%s</i>' % s
+
+    transforms_by_part_type = {
+        Msg.PartType.PROMPT_QUESTION: lambda s: _HTMLTransforms._wrap_fg_color("#34E2E2", s),
+        Msg.PartType.PROMPT_ANSWER:   lambda s: _HTMLTransforms._wrap_italic(s),
+
+        Msg.PartType.PRINT:    lambda s: s,
+        Msg.PartType.STATUS:   lambda s: _HTMLTransforms._wrap_fg_color("#8AE234", s),
+        Msg.PartType.ERROR:    lambda s: _HTMLTransforms._wrap_fg_color("#EF2929", s),
+        Msg.PartType.ACCENT:   lambda s: _HTMLTransforms._wrap_fg_color("#729FCF", s),
+        Msg.PartType.BRIGHT:   lambda s: _HTMLTransforms._wrap_bold(s),
+        Msg.PartType.BG_HAPPY: lambda s: _HTMLTransforms._wrap_bg_color("green", s),
+        Msg.PartType.BG_SAD:   lambda s: _HTMLTransforms._wrap_bg_color("red", s),
+        Msg.PartType.BG_MEH:   lambda s: _HTMLTransforms._wrap_bg_color("blue", s)
+    }
+
+    @staticmethod
+    def escape_html(text: str):
+        return text.replace("&", "&amp;").replace("\"", "&quot;").replace("'", "&apos;") \
+                   .replace("<", "&lt;").replace(">", "&gt;")
+
+
+def html_part_processor(part_type: Msg.PartType, part_str: str) -> str:
+    """
+    A part processor (see Msg::get_string) that generates HTML. It's expected that the HTML content
+    will be embedded inside <pre></pre> tags.
+    """
+    html_part_str = _HTMLTransforms.escape_html(part_str)
+    if part_type is not None:
+        html_part_str = _HTMLTransforms.transforms_by_part_type[part_type](html_part_str)
+    return html_part_str
+
+
 class Log:
     """
     Interface for read-only I/O classes that log their output in some way.
     """
 
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._enabled = True
+        self._closed = False
+
+    def _write(self, msg: Msg):
+        """
+        See Log::output. This method should be overridden in subclasses to do the actual output
+        operation.
+        """
+        raise NotImplementedError()
+
+    def _flush(self):
+        """
+        See Log::flush. This method should be overridden in subclasses to flush output, if
+        necessary.
+        """
+        pass
+
+    def _close(self):
+        """
+        See Log::close. This method should be overridden in subclasses to close any open resources,
+        if necessary.
+        """
+        pass
+
     def output(self, msg: Msg):
         """
         Append a message to the log.
         """
-        raise NotImplementedError()
+        if not self._closed:
+            with self._lock:
+                if not self._closed and self._enabled:
+                    self._write(msg)
+                    self._flush()
+
+    def flush(self):
+        """
+        Flush any buffered output.
+        """
+        if not self._closed:
+            with self._lock:
+                if not self._closed:
+                    self._flush()
+
+    def close(self):
+        """
+        Close the log and release any resources. This cannot be reversed. Any future calls to Log
+        methods will silently do nothing.
+        """
+        with self._lock:
+            if not self._closed:
+                self._closed = True
+                self._flush()
+                self._close()
+
+    def pause_logging(self):
+        """
+        Pause writing output to this log. Any future calls to Log::output will silently do nothing
+        until Log::resume_logging is called to resume logging.
+        """
+        with self._lock:
+            self._enabled = False
+
+    def resume_logging(self):
+        """
+        Resume writing output to this log (if previously paused with Log::pause_logging).
+        """
+        with self._lock:
+            self._enabled = True
+
+
+class NullLog(Log):
+    """
+    Log implementation that doesn't do anything.
+    """
+
+    def _write(self, msg: Msg):
+        pass
+
+    def output(self, msg: Msg):
+        # This is overridden so we don't bother acquiring the lock
+        pass
+
+    def flush(self):
+        # This is overridden so we don't bother acquiring the lock
+        pass
 
 
 class MemoryLog(Log):
     """
-    Abstract class for in-memory Log subclasses.
+    Log implementation that stores a log in memory.
+    """
+
+    def __init__(self, part_processor: Optional[Msg.PartProcessor] = None):
+        super().__init__()
+        self._part_processor = part_processor
+        self._content = ""
+
+    def _write(self, msg: Msg):
+        self._content += msg.get_string(self._part_processor)
+
+    def get_content(self) -> str:
+        """
+        Read all the content in the log.
+        """
+        with self._lock:
+            return self._content
+
+
+class HTMLMemoryLog(MemoryLog):
+    """
+    MemoryLog subclass that renders the log as HTML.
     """
 
     def __init__(self):
-        self._log_stream = io.StringIO()
-        self._lock = threading.Lock()
+        super().__init__(html_part_processor)
 
-    def start_logging(self):
-        """Start a fresh log, disregarding any previous log contents."""
+    def get_content(self) -> str:
         with self._lock:
-            self._log_stream = io.StringIO()
+            return '<pre>' + self._content + '</pre>'
 
-    def get_log(self):
-        """Get the contents of the log."""
-        with self._lock:
-            self._log_stream.seek(0)
-            return self._log_stream.read()
 
-    def output(self, msg: Msg):
-        with self._lock:
-            self._log_stream.write(msg.get_string(self._msg_part_processor))
+class FileLog(Log):
+    """
+    Log implementation that logs to a file.
+    """
 
-    def _msg_part_processor(self, part_type: Msg.PartType, part_str: str) -> str:
-        """
-        Process and format an individual part of a message. (See Msg::get_string)
-        """
-        raise NotImplementedError()
+    def __init__(self, file, part_processor: Optional[Msg.PartProcessor] = None):
+        super().__init__()
+        self._file = file
+        self._part_processor = part_processor
+
+    def _write(self, msg: Msg):
+        self._file.write(msg.get_string(self._part_processor))
+
+    def _flush(self):
+        self._file.flush()
+
+    def _close(self):
+        self._file.close()
+
+
+class HTMLFileLog(FileLog):
+    """
+    FileLog subclass that renders the log as HTML.
+    """
+
+    def __init__(self, file):
+        super().__init__(file, html_part_processor)
+        file.write('\n\n<pre style="background-color: black; color: white;">\n')
+
+    def _close(self):
+        self._file.write('\n</pre>\n\n')
+        super()._close()
 
 
 class Channel:
     """
     Abstract class that provides methods to get input from the user and give output back to the
     user, following a command-line-like setting. The actual input and output operations are
-    implemented in subclasses. This is the read-write equivalent of the Log interface.
+    implemented in subclasses.
 
     By convention, subclass names end in "Channel".
 
-    An instance of Channel can have "delegates", which are instances of subclasses of Log that are
+    An instance of Channel can have "delegates", which are instances of Log subclasses that are
     written to whenever the original instance outputs something (or to echo back user input).
     """
 
     def __init__(self, *delegates: Log):
-        self._delegates = delegates
+        self._delegates = set(delegates)
         self._lock = threading.Lock()
         self._cv = threading.Condition(self._lock)
         self._line = []
+        self._closed = False
 
     def _out(self, msg: Msg):
         """
@@ -179,6 +350,14 @@ class Channel:
         operation.
         """
         raise NotImplementedError()
+
+    def _close(self):
+        """
+        See Channel::close. This method should be overridden in subclasses to close any open
+        resources, if necessary. After this method is called, none of the other abstract methods
+        will be called for the rest of the channel's lifetime.
+        """
+        pass
 
     def get_window_size(self) -> Tuple[Optional[int], Optional[int]]:
         """
@@ -196,9 +375,33 @@ class Channel:
         with self._lock:
             self._line.append(me)
             self._cv.wait_for(lambda: self._line[0] == me)
+
             assert self._line.pop(0) == me
+            if self._closed:
+                raise ValueError("Channel is already closed")
             yield
+
             self._cv.notify_all()
+
+    def add_delegate(self, *delegates: Log):
+        """
+        Add one or more new delegates to this channel. The new delegates will receive any future
+        messages, but will not be backfilled with previous messages.
+        """
+        with self._wait_in_line():
+            self._delegates |= set(delegates)
+
+    def close(self):
+        """
+        Close any resources held by this channel (or any delegates). This should be called when the
+        channel is no longer needed and will not be accessed again. Any future attempts to use the
+        channel will raise an exception.
+        """
+        with self._wait_in_line():
+            self._closed = True
+            for delegate in self._delegates:
+                delegate.close()
+            self._close()
 
     def _message_delegates_nosync(self, msg: Msg):
         for delegate in self._delegates:
@@ -469,63 +672,6 @@ class Channel:
     def bg_meh(self, *args, **kwargs):
         """Shortcut for output(Msg(...).bg_meh(...))"""
         self.output(Msg(**kwargs).bg_meh(*args))
-
-
-class TextMemoryLog(MemoryLog):
-    """
-    A MemoryLog implementation that generates a plain text log.
-    """
-
-    def _msg_part_processor(self, part_type: Msg.PartType, part_str: str) -> str:
-        return part_str
-
-
-class HTMLMemoryLog(MemoryLog):
-    """
-    A MemoryLog implementation that generates an HTML log. It's expected that the HTML content will
-    be embedded inside <pre></pre> tags.
-    """
-
-    @staticmethod
-    def _wrap_fg_color(color, s):
-        return '<span style="color: %s; font-weight: bold;">%s</span>' % (color, s)
-
-    @staticmethod
-    def _wrap_bg_color(color, s):
-        return '<span style="background-color: %s; font-weight: bold;">%s</span>' % (color, s)
-
-    @staticmethod
-    def _wrap_bold(s):
-        return '<b>%s</b>' % s
-
-    @staticmethod
-    def _wrap_italic(s):
-        return '<i>%s</i>' % s
-
-    _transforms_by_part_type = {
-        Msg.PartType.PROMPT_QUESTION: lambda s: HTMLMemoryLog._wrap_fg_color("#34E2E2", s),
-        Msg.PartType.PROMPT_ANSWER:   lambda s: HTMLMemoryLog._wrap_italic(s),
-
-        Msg.PartType.PRINT:    lambda s: s,
-        Msg.PartType.STATUS:   lambda s: HTMLMemoryLog._wrap_fg_color("#8AE234", s),
-        Msg.PartType.ERROR:    lambda s: HTMLMemoryLog._wrap_fg_color("#EF2929", s),
-        Msg.PartType.ACCENT:   lambda s: HTMLMemoryLog._wrap_fg_color("#729FCF", s),
-        Msg.PartType.BRIGHT:   lambda s: HTMLMemoryLog._wrap_bold(s),
-        Msg.PartType.BG_HAPPY: lambda s: HTMLMemoryLog._wrap_bg_color("green", s),
-        Msg.PartType.BG_SAD:   lambda s: HTMLMemoryLog._wrap_bg_color("red", s),
-        Msg.PartType.BG_MEH:   lambda s: HTMLMemoryLog._wrap_bg_color("blue", s)
-    }
-
-    @staticmethod
-    def _escape_html(text: str):
-        return text.replace("&", "&amp;").replace("\"", "&quot;").replace("'", "&apos;") \
-                   .replace("<", "&lt;").replace(">", "&gt;")
-
-    def _msg_part_processor(self, part_type: Msg.PartType, part_str: str) -> str:
-        html_part_str = HTMLMemoryLog._escape_html(part_str)
-        if part_type is not None:
-            html_part_str = HTMLMemoryLog._transforms_by_part_type[part_type](html_part_str)
-        return html_part_str
 
 
 class CLIChannel(Channel):
