@@ -16,6 +16,7 @@ import contextlib
 import shutil
 import sys
 import threading
+import time
 from enum import Enum
 from typing import Callable, List, Optional, Tuple
 
@@ -164,6 +165,8 @@ class Log:
         self._lock = threading.Lock()
         self._enabled = True
         self._closed = False
+        self.open_timestamp = time.time()
+        self.close_timestamp = None
 
     def _write(self, msg: Msg):
         """
@@ -215,6 +218,7 @@ class Log:
                 self._closed = True
                 self._flush()
                 self._close()
+                self.close_timestamp = time.time()
 
     def pause_logging(self):
         """
