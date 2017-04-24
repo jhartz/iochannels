@@ -111,19 +111,19 @@ class _HTMLTransforms:
 
     @staticmethod
     def _wrap_fg_color(color, s):
-        return '<span style="color: %s; font-weight: bold;">%s</span>' % (color, s)
+        return '<span style="color: {}; font-weight: bold;">{}</span>'.format(color, s)
 
     @staticmethod
     def _wrap_bg_color(color, s):
-        return '<span style="background-color: %s; font-weight: bold;">%s</span>' % (color, s)
+        return '<span style="background-color: {}; font-weight: bold;">{}</span>'.format(color, s)
 
     @staticmethod
     def _wrap_bold(s):
-        return '<b>%s</b>' % s
+        return '<b>{}</b>'.format(s)
 
     @staticmethod
     def _wrap_italic(s):
-        return '<i>%s</i>' % s
+        return '<i>{}</i>'.format(s)
 
     transforms_by_part_type = {
         Msg.PartType.PROMPT_QUESTION: lambda s: _HTMLTransforms._wrap_fg_color("#34E2E2", s),
@@ -462,7 +462,7 @@ class Channel:
 
         msg = prompt
         if show_choices:
-            msg += " (%s)" % user_choices
+            msg += " ({})".format(user_choices)
         msg += ":"
 
         while True:
@@ -734,17 +734,17 @@ class ColorCLIChannel(CLIChannel):
     """
 
     def _wrap_bright(self, s):
-        return "%s%s%s" % (self._colorama.Style.BRIGHT, s, self._colorama.Style.NORMAL)
+        return "{}{}{}".format(self._colorama.Style.BRIGHT, s, self._colorama.Style.NORMAL)
 
     def _wrap_fg_color(self, color, s):
-        return "%s%s%s" % (getattr(self._colorama.Fore, color),
-                           self._wrap_bright(s),
-                           self._colorama.Fore.RESET)
+        return "{}{}{}".format(getattr(self._colorama.Fore, color),
+                               self._wrap_bright(s),
+                               self._colorama.Fore.RESET)
 
     def _wrap_bg_color(self, color, s):
-        return "%s%s%s" % (getattr(self._colorama.Back, color),
-                           self._wrap_fg_color("WHITE", s),
-                           self._colorama.Back.RESET)
+        return "{}{}{}".format(getattr(self._colorama.Back, color),
+                               self._wrap_fg_color("WHITE", s),
+                               self._colorama.Back.RESET)
 
     def __init__(self, *delegates, use_readline: bool = True,
                  application_name_for_error: Optional[str] = None):
