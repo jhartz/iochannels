@@ -18,14 +18,14 @@ import sys
 import threading
 import time
 from enum import Enum
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Generator, List, Optional, Sized, TextIO, Tuple
 
 
 DEFAULT_BAD_CHOICE_MSG = "Invalid choice: {}"
 DEFAULT_EMPTY_CHOICE_MSG = "Choose one of: {}"
 
 
-class Msg:
+class Msg(Sized):
     """
     A message that can be printed using an instance of an implementation of Channel or Log.
     """
@@ -45,47 +45,47 @@ class Msg:
 
     PartProcessor = Callable[[PartType, str], str]
 
-    def __init__(self, sep: str = " ", end: str = "\n"):
+    def __init__(self, sep: str = " ", end: str = "\n") -> None:
         """
         Initialize a new message.
 
         :param sep: The separator between parts of the message.
         :param end: A string to use to terminate the message.
         """
-        self._parts = []
-        self._sep = sep
-        self._end = end
+        self._parts = []  # type: List[Tuple[Msg.PartType, str]]
+        self._sep = sep  # type: str
+        self._end = end  # type: str
 
-    def add(self, part_type: "Msg.PartType", base: str = "", *args) -> "Msg":
+    def add(self, part_type: "Msg.PartType", base: str = "", *args: object) -> "Msg":
         base = base or ""
         self._parts.append((part_type, str(base).format(*args)))
         return self
 
-    def print(self, *args) -> "Msg":
-        return self.add(Msg.PartType.PRINT, *args)
+    def print(self, base: str = "", *args: object) -> "Msg":
+        return self.add(Msg.PartType.PRINT, base, *args)
 
-    def status(self, *args) -> "Msg":
-        return self.add(Msg.PartType.STATUS, *args)
+    def status(self, base: str, *args: object) -> "Msg":
+        return self.add(Msg.PartType.STATUS, base, *args)
 
-    def error(self, *args) -> "Msg":
-        return self.add(Msg.PartType.ERROR, *args)
+    def error(self, base: str, *args: object) -> "Msg":
+        return self.add(Msg.PartType.ERROR, base, *args)
 
-    def accent(self, *args) -> "Msg":
-        return self.add(Msg.PartType.ACCENT, *args)
+    def accent(self, base: str, *args: object) -> "Msg":
+        return self.add(Msg.PartType.ACCENT, base, *args)
 
-    def bright(self, *args) -> "Msg":
-        return self.add(Msg.PartType.BRIGHT, *args)
+    def bright(self, base: str, *args: object) -> "Msg":
+        return self.add(Msg.PartType.BRIGHT, base, *args)
 
-    def bg_happy(self, *args) -> "Msg":
-        return self.add(Msg.PartType.BG_HAPPY, *args)
+    def bg_happy(self, base: str, *args: object) -> "Msg":
+        return self.add(Msg.PartType.BG_HAPPY, base, *args)
 
-    def bg_sad(self, *args) -> "Msg":
-        return self.add(Msg.PartType.BG_SAD, *args)
+    def bg_sad(self, base: str, *args: object) -> "Msg":
+        return self.add(Msg.PartType.BG_SAD, base, *args)
 
-    def bg_meh(self, *args) -> "Msg":
-        return self.add(Msg.PartType.BG_MEH, *args)
+    def bg_meh(self, base: str, *args: object) -> "Msg":
+        return self.add(Msg.PartType.BG_MEH, base, *args)
 
-    def get_string(self, part_processor: Optional[PartProcessor] = None) -> str:
+    def get_string(self, part_processor: PartProcessor = None) -> str:
         """
         Transform this message into a string representation.
 
@@ -99,7 +99,7 @@ class Msg:
         return self._sep.join(part_processor(part_type, part_str)
                               for part_type, part_str in self._parts) + self._end
 
-    def __len__(self):
+    def __len__(self) -> int:
         """
         Get the length of this message when viewed as just plain, unformatted characters.
         """
@@ -110,19 +110,19 @@ class _HTMLTransforms:
     """Helpers for html_part_processor"""
 
     @staticmethod
-    def _wrap_fg_color(color, s):
+    def _wrap_fg_color(color: str, s: str) -> str:
         return '<span style="color: {}; font-weight: bold;">{}</span>'.format(color, s)
 
     @staticmethod
-    def _wrap_bg_color(color, s):
+    def _wrap_bg_color(color: str, s: str) -> str:
         return '<span style="background-color: {}; font-weight: bold;">{}</span>'.format(color, s)
 
     @staticmethod
-    def _wrap_bold(s):
+    def _wrap_bold(s: str) -> str:
         return '<b>{}</b>'.format(s)
 
     @staticmethod
-    def _wrap_italic(s):
+    def _wrap_italic(s: str) -> str:
         return '<i>{}</i>'.format(s)
 
     transforms_by_part_type = {
@@ -140,7 +140,7 @@ class _HTMLTransforms:
     }
 
     @staticmethod
-    def escape_html(text: str):
+    def escape_html(text: str) -> str:
         return text.replace("&", "&amp;").replace("\"", "&quot;").replace("'", "&apos;") \
                    .replace("<", "&lt;").replace(">", "&gt;")
 
@@ -161,35 +161,35 @@ class Log:
     Interface for read-only I/O classes that log their output in some way.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._lock = threading.Lock()
         self._enabled = True
         self._closed = False
-        self.open_timestamp = time.time()
-        self.close_timestamp = None
+        self.open_timestamp = time.time()  # type: float
+        self.close_timestamp = None  # type: Optional[float]
 
-    def _write(self, msg: Msg):
+    def _write(self, msg: Msg) -> None:
         """
         See Log::output. This method should be overridden in subclasses to do the actual output
         operation.
         """
         raise NotImplementedError()
 
-    def _flush(self):
+    def _flush(self) -> None:
         """
         See Log::flush. This method should be overridden in subclasses to flush output, if
         necessary.
         """
         pass
 
-    def _close(self):
+    def _close(self) -> None:
         """
         See Log::close. This method should be overridden in subclasses to close any open resources,
         if necessary.
         """
         pass
 
-    def output(self, msg: Msg):
+    def output(self, msg: Msg) -> None:
         """
         Append a message to the log.
         """
@@ -199,7 +199,7 @@ class Log:
                     self._write(msg)
                     self._flush()
 
-    def flush(self):
+    def flush(self) -> None:
         """
         Flush any buffered output.
         """
@@ -208,7 +208,7 @@ class Log:
                 if not self._closed:
                     self._flush()
 
-    def close(self):
+    def close(self) -> None:
         """
         Close the log and release any resources. This cannot be reversed. Any future calls to Log
         methods will silently do nothing.
@@ -220,7 +220,7 @@ class Log:
                 self._close()
                 self.close_timestamp = time.time()
 
-    def pause_logging(self):
+    def pause_logging(self) -> None:
         """
         Pause writing output to this log. Any future calls to Log::output will silently do nothing
         until Log::resume_logging is called to resume logging.
@@ -228,7 +228,7 @@ class Log:
         with self._lock:
             self._enabled = False
 
-    def resume_logging(self):
+    def resume_logging(self) -> None:
         """
         Resume writing output to this log (if previously paused with Log::pause_logging).
         """
@@ -241,14 +241,14 @@ class NullLog(Log):
     Log implementation that doesn't do anything.
     """
 
-    def _write(self, msg: Msg):
+    def _write(self, msg: Msg) -> None:
         pass
 
-    def output(self, msg: Msg):
+    def output(self, msg: Msg) -> None:
         # This is overridden so we don't bother acquiring the lock
         pass
 
-    def flush(self):
+    def flush(self) -> None:
         # This is overridden so we don't bother acquiring the lock
         pass
 
@@ -258,12 +258,12 @@ class MemoryLog(Log):
     Log implementation that stores a log in memory.
     """
 
-    def __init__(self, part_processor: Optional[Msg.PartProcessor] = None):
+    def __init__(self, part_processor: Msg.PartProcessor = None) -> None:
         super().__init__()
         self._part_processor = part_processor
         self._content = ""
 
-    def _write(self, msg: Msg):
+    def _write(self, msg: Msg) -> None:
         self._content += msg.get_string(self._part_processor)
 
     def get_content(self) -> str:
@@ -279,7 +279,7 @@ class HTMLMemoryLog(MemoryLog):
     MemoryLog subclass that renders the log as HTML.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(html_part_processor)
 
     def get_content(self) -> str:
@@ -292,18 +292,18 @@ class FileLog(Log):
     Log implementation that logs to a file.
     """
 
-    def __init__(self, file, part_processor: Optional[Msg.PartProcessor] = None):
+    def __init__(self, file: TextIO, part_processor: Msg.PartProcessor = None) -> None:
         super().__init__()
         self._file = file
         self._part_processor = part_processor
 
-    def _write(self, msg: Msg):
+    def _write(self, msg: Msg) -> None:
         self._file.write(msg.get_string(self._part_processor))
 
-    def _flush(self):
+    def _flush(self) -> None:
         self._file.flush()
 
-    def _close(self):
+    def _close(self) -> None:
         self._file.close()
 
 
@@ -312,11 +312,11 @@ class HTMLFileLog(FileLog):
     FileLog subclass that renders the log as HTML.
     """
 
-    def __init__(self, file):
+    def __init__(self, file: TextIO) -> None:
         super().__init__(file, html_part_processor)
         file.write('\n\n<pre style="background-color: black; color: white;">\n')
 
-    def _close(self):
+    def _close(self) -> None:
         self._file.write('\n</pre>\n\n')
         super()._close()
 
@@ -333,29 +333,28 @@ class Channel:
     written to whenever the original instance outputs something (or to echo back user input).
     """
 
-    def __init__(self, *delegates: Log):
+    def __init__(self, *delegates: Log) -> None:
         self._delegates = set(delegates)
         self._lock = threading.Lock()
         self._cv = threading.Condition(self._lock)
-        self._line = []
+        self._line = []  # type: List[threading.Thread]
         self._closed = False
 
-    def _out(self, msg: Msg):
+    def _out(self, msg: Msg) -> None:
         """
         See Channel::output. This method should be overridden in subclasses to do the actual output
         operation.
         """
         raise NotImplementedError()
 
-    def _in(self, prompt_msg: Optional[Msg] = None,
-            autocomplete_choices: List[str] = None) -> Optional[str]:
+    def _in(self, prompt_msg: Msg = None, autocomplete_choices: List[str] = None) -> Optional[str]:
         """
         See Channel::input. This method should be overridden in subclasses to do the actual input
         operation.
         """
         raise NotImplementedError()
 
-    def _close(self):
+    def _close(self) -> None:
         """
         See Channel::close. This method should be overridden in subclasses to close any open
         resources, if necessary. After this method is called, none of the other abstract methods
@@ -374,11 +373,11 @@ class Channel:
         return None, None
 
     @contextlib.contextmanager
-    def _wait_in_line(self):
+    def _wait_in_line(self) -> Generator[None, None, None]:
         me = threading.current_thread()
         with self._lock:
             self._line.append(me)
-            self._cv.wait_for(lambda: self._line[0] == me)
+            self._cv.wait_for(lambda: self._line[0] == me, None)
 
             assert self._line.pop(0) == me
             if self._closed:
@@ -387,7 +386,7 @@ class Channel:
 
             self._cv.notify_all()
 
-    def add_delegate(self, *delegates: Log):
+    def add_delegate(self, *delegates: Log) -> None:
         """
         Add one or more new delegates to this channel. The new delegates will receive any future
         messages, but will not be backfilled with previous messages.
@@ -395,7 +394,7 @@ class Channel:
         with self._wait_in_line():
             self._delegates |= set(delegates)
 
-    def close(self):
+    def close(self) -> None:
         """
         Close any resources held by this channel (or any delegates). This should be called when the
         channel is no longer needed and will not be accessed again. Any future attempts to use the
@@ -407,24 +406,24 @@ class Channel:
                 delegate.close()
             self._close()
 
-    def _message_delegates_nosync(self, msg: Msg):
+    def _message_delegates_nosync(self, msg: Msg) -> None:
         for delegate in self._delegates:
             delegate.output(msg)
 
-    def _output_nosync(self, msg: Msg):
+    def _output_nosync(self, msg: Msg) -> None:
         """
         See Channel::output.
         """
         self._out(msg)
         self._message_delegates_nosync(msg)
 
-    def _input_nosync(self, prompt: Optional[str] = None,
+    def _input_nosync(self, prompt: str = None,
                       autocomplete_choices: List[str] = None) -> Optional[str]:
         """
         See Channel::input.
         """
         msg = None
-        if prompt:
+        if prompt is not None:
             msg = Msg(end=" ").add(Msg.PartType.PROMPT_QUESTION, prompt)
             self._message_delegates_nosync(msg)
         line = self._in(msg, autocomplete_choices)
@@ -434,8 +433,8 @@ class Channel:
             self._message_delegates_nosync(Msg().add(Msg.PartType.PROMPT_ANSWER, line))
         return line
 
-    def _prompt_nosync(self, prompt: str, choices: List[str], default_choice: Optional[str] = None,
-                       show_choices: bool = True, hidden_choices: bool = None,
+    def _prompt_nosync(self, prompt: str, choices: List[str], default_choice: str = None,
+                       show_choices: bool = True, hidden_choices: List[str] = None,
                        bad_choice_msg: str = DEFAULT_BAD_CHOICE_MSG,
                        empty_choice_msg: str = DEFAULT_EMPTY_CHOICE_MSG) -> str:
         """
@@ -445,13 +444,13 @@ class Channel:
         user_choices = ""
         has_empty_choice = False
 
-        for choice in choices:
-            if choice == "":
+        for c in choices:
+            if c == "":
                 has_empty_choice = True
             else:
-                our_choices.append(choice.lower())
-                if hidden_choices is None or choice not in hidden_choices:
-                    user_choices += choice + "/"
+                our_choices.append(c.lower())
+                if hidden_choices is None or c not in hidden_choices:
+                    user_choices += c + "/"
 
         if has_empty_choice:
             # We add in this choice last
@@ -483,15 +482,14 @@ class Channel:
                 else:
                     self._output_nosync(Msg().error(bad_choice_msg, choice))
 
-    def output(self, msg: Msg):
+    def output(self, msg: Msg) -> None:
         """
         Print a message to the user.
         """
         with self._wait_in_line():
             self._output_nosync(msg)
 
-    def input(self, prompt: Optional[str] = None,
-              autocomplete_choices: List[str] = None) -> Optional[str]:
+    def input(self, prompt: str = None, autocomplete_choices: List[str] = None) -> Optional[str]:
         """
         Ask the user for a line of input. It is better to specify a "prompt" here, rather than
         printing the prompt message without a trailing newline and then calling this method (the
@@ -506,8 +504,8 @@ class Channel:
         with self._wait_in_line():
             return self._input_nosync(prompt, autocomplete_choices)
 
-    def prompt(self, prompt: str, choices: List[str], default_choice: Optional[str] = None,
-               show_choices: bool = True, hidden_choices: bool = None,
+    def prompt(self, prompt: str, choices: List[str], default_choice: str = None,
+               show_choices: bool = True, hidden_choices: List[str] = None,
                bad_choice_msg: str = DEFAULT_BAD_CHOICE_MSG,
                empty_choice_msg: str = DEFAULT_EMPTY_CHOICE_MSG) -> str:
         """
@@ -533,7 +531,11 @@ class Channel:
                                        hidden_choices, bad_choice_msg, empty_choice_msg)
 
     @contextlib.contextmanager
-    def blocking_io(self):
+    def blocking_io(self) -> Generator[Tuple[
+                Callable[[Msg], None],
+                Callable[[Optional[str], Optional[List[str]]], Optional[str]],
+                Callable[[str, List[str], Optional[str], bool, Optional[List[str]], str, str], str]
+            ], None, None]:
         """
         Block all synchronous I/O, only allowing input and output in one place. This is useful if
         you want to execute a series of I/O calls in sequence, without being interrupted.
@@ -552,7 +554,7 @@ class Channel:
         with self._wait_in_line():
             yield (self._output_nosync, self._input_nosync, self._prompt_nosync)
 
-    def output_list(self, msgs: List[Msg], prefix: str = "  "):
+    def output_list(self, msgs: List[Msg], prefix: str = "  ") -> None:
         """
         Print a list of messages to the user. We will try to organize them in columns, similar to
         the "ls" command. If any of the messages contains a newline character, then they ruin it
@@ -601,11 +603,12 @@ class Channel:
                                 Msg(end="").print(" " * (col_lengths[col_index] - len(msg))))
                 self._output_nosync(Msg().print())
 
-    def print(self, *args, **kwargs):
+    def print(self, base: str = "", *args: object, **kwargs: str) -> None:
         """Shortcut for output(Msg(...).print(...))"""
-        self.output(Msg(**kwargs).print(*args))
+        self.output(Msg(**kwargs).print(base, *args))
 
-    def print_bordered(self, base: str, *args, type: Msg.PartType = Msg.PartType.PRINT):
+    def print_bordered(self, base: str, *args: object,
+                       type: Msg.PartType = Msg.PartType.PRINT) -> None:
         """
         Print a bordered message.
         """
@@ -636,49 +639,49 @@ class Channel:
         msg.add(type, "{}", "*" * cols)
         self.output(msg)
 
-    def status(self, *args, **kwargs):
+    def status(self, base: str, *args: object, **kwargs: str) -> None:
         """Shortcut for output(Msg(...).status(...))"""
-        self.output(Msg(**kwargs).status(*args))
+        self.output(Msg(**kwargs).status(base, *args))
 
-    def status_bordered(self, *args):
+    def status_bordered(self, base: str, *args: object) -> None:
         """Shortcut for print_bordered(..., STATUS)"""
-        self.print_bordered(*args, type=Msg.PartType.STATUS)
+        self.print_bordered(base, *args, type=Msg.PartType.STATUS)
 
-    def error(self, *args, **kwargs):
+    def error(self, base: str, *args: object, **kwargs: str) -> None:
         """Shortcut for output(Msg(...).error(...))"""
-        self.output(Msg(**kwargs).error(*args))
+        self.output(Msg(**kwargs).error(base, *args))
 
-    def error_bordered(self, *args):
+    def error_bordered(self, base: str, *args: object) -> None:
         """Shortcut for print_bordered(..., ERROR)"""
-        self.print_bordered(*args, type=Msg.PartType.ERROR)
+        self.print_bordered(base, *args, type=Msg.PartType.ERROR)
 
-    def accent(self, *args, **kwargs):
+    def accent(self, base: str, *args: object, **kwargs: str) -> None:
         """Shortcut for output(Msg(...).accent(...))"""
-        self.output(Msg(**kwargs).accent(*args))
+        self.output(Msg(**kwargs).accent(base, *args))
 
-    def accent_bordered(self, *args):
+    def accent_bordered(self, base: str, *args: object) -> None:
         """Shortcut for print_bordered(..., ACCENT)"""
-        self.print_bordered(*args, type=Msg.PartType.ACCENT)
+        self.print_bordered(base, *args, type=Msg.PartType.ACCENT)
 
-    def bright(self, *args, **kwargs):
+    def bright(self, base: str, *args: object, **kwargs: str) -> None:
         """Shortcut for output(Msg(...).bright(...))"""
-        self.output(Msg(**kwargs).bright(*args))
+        self.output(Msg(**kwargs).bright(base, *args))
 
-    def bright_bordered(self, *args):
+    def bright_bordered(self, base: str, *args: object) -> None:
         """Shortcut for print_bordered(..., BRIGHT)"""
-        self.print_bordered(*args, type=Msg.PartType.BRIGHT)
+        self.print_bordered(base, *args, type=Msg.PartType.BRIGHT)
 
-    def bg_happy(self, *args, **kwargs):
+    def bg_happy(self, base: str, *args: object, **kwargs: str) -> None:
         """Shortcut for output(Msg(...).bg_happy(...))"""
-        self.output(Msg(**kwargs).bg_happy(*args))
+        self.output(Msg(**kwargs).bg_happy(base, *args))
 
-    def bg_sad(self, *args, **kwargs):
+    def bg_sad(self, base: str, *args: object, **kwargs: str) -> None:
         """Shortcut for output(Msg(...).bg_sad(...))"""
-        self.output(Msg(**kwargs).bg_sad(*args))
+        self.output(Msg(**kwargs).bg_sad(base, *args))
 
-    def bg_meh(self, *args, **kwargs):
+    def bg_meh(self, base: str, *args: object, **kwargs: str) -> None:
         """Shortcut for output(Msg(...).bg_meh(...))"""
-        self.output(Msg(**kwargs).bg_meh(*args))
+        self.output(Msg(**kwargs).bg_meh(base, *args))
 
 
 class CLIChannel(Channel):
@@ -687,7 +690,7 @@ class CLIChannel(Channel):
     "readline" for autocompletion if available.
     """
 
-    def __init__(self, *delegates, use_readline: bool = True):
+    def __init__(self, *delegates: Log, use_readline: bool = True) -> None:
         super().__init__(*delegates)
 
         if use_readline:
@@ -696,19 +699,19 @@ class CLIChannel(Channel):
         else:
             self._readline_completer = None
 
-    def _set_options(self, options: Optional[List[str]]):
+    def _set_options(self, options: Optional[List[str]]) -> None:
         if self._readline_completer:
             self._readline_completer.set_options(options)
 
-    def _out(self, msg: Msg):
+    def _out(self, msg: Msg) -> None:
         print(self._msg_to_string(msg), end="")
         sys.stdout.flush()
 
-    def _in(self, prompt_msg: Optional[Msg] = None,
-            autocomplete_choices: List[str] = None) -> Optional[str]:
+    def _in(self, prompt_msg: Msg = None, autocomplete_choices: List[str] = None) -> Optional[str]:
         if autocomplete_choices is not None:
             self._set_options(autocomplete_choices)
 
+        line = None  # type: Optional[str]
         try:
             if prompt_msg:
                 line = input(self._msg_to_string(prompt_msg))
@@ -716,7 +719,6 @@ class CLIChannel(Channel):
                 line = input()
         except EOFError:
             print()
-            line = None
 
         self._set_options(None)
         return line
@@ -733,21 +735,21 @@ class ColorCLIChannel(CLIChannel):
     A subclass of CLIChannel that prints messages in color.
     """
 
-    def _wrap_bright(self, s):
+    def _wrap_bright(self, s: str) -> str:
         return "{}{}{}".format(self._colorama.Style.BRIGHT, s, self._colorama.Style.NORMAL)
 
-    def _wrap_fg_color(self, color, s):
+    def _wrap_fg_color(self, color: str, s: str) -> str:
         return "{}{}{}".format(getattr(self._colorama.Fore, color),
                                self._wrap_bright(s),
                                self._colorama.Fore.RESET)
 
-    def _wrap_bg_color(self, color, s):
+    def _wrap_bg_color(self, color: str, s: str) -> str:
         return "{}{}{}".format(getattr(self._colorama.Back, color),
                                self._wrap_fg_color("WHITE", s),
                                self._colorama.Back.RESET)
 
-    def __init__(self, *delegates, use_readline: bool = True,
-                 application_name_for_error: Optional[str] = None):
+    def __init__(self, *delegates: Log, use_readline: bool = True,
+                 application_name_for_error: str = None) -> None:
         super().__init__(*delegates, use_readline=use_readline)
 
         from support import colorama_support

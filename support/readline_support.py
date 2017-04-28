@@ -10,7 +10,7 @@ Author: Jake Hartz <jake@hartz.io>
 """
 
 import atexit
-from typing import List, Optional
+from typing import Callable, List, Optional, cast
 
 
 class InputCompleter:
@@ -19,15 +19,15 @@ class InputCompleter:
     Inspired by rlcompleter from the python standard library.
     """
 
-    def __init__(self):
-        self.options = None
-        self.matches = None
+    def __init__(self) -> None:
+        self.options = None  # type: Optional[List[str]]
+        self.matches = None  # type: Optional[List[str]]
 
-    def set_options(self, options: Optional[List[str]]):
+    def set_options(self, options: Optional[List[str]]) -> None:
         self.options = options
         self.matches = None
 
-    def __call__(self, text, state):
+    def __call__(self, text: str, state: int) -> Optional[str]:
         """
         Get the next possible completion for "text".
 
@@ -55,8 +55,8 @@ class InputCompleter:
 
 try:
     import readline as _readline
-    global_readline_completer = InputCompleter()
-    _readline.set_completer(global_readline_completer)
+    global_readline_completer = InputCompleter()  # type: Optional[InputCompleter]
+    _readline.set_completer(cast(Callable[[str, int], str], global_readline_completer))
     _readline.parse_and_bind("tab: complete")
     atexit.register(lambda: _readline.set_completer(None))
 except ImportError:
