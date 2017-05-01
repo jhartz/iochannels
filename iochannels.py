@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 from enum import Enum
-from typing import Callable, Generator, List, Optional, Sized, TextIO, Tuple
+from typing import Callable, Generator, List, Optional, Sized, TextIO, Tuple, Union
 
 
 DEFAULT_BAD_CHOICE_MSG = "Invalid choice: {}"
@@ -354,7 +354,8 @@ class Channel:
         """
         raise NotImplementedError()
 
-    def _in(self, prompt_msg: Msg = None, autocomplete_choices: List[str] = None) -> Optional[str]:
+    def _in(self, prompt_msg: Msg = None,
+            autocomplete_choices: Union[str, List[str]] = None) -> Optional[str]:
         """
         See Channel::input. This method should be overridden in subclasses to do the actual input
         operation.
@@ -433,7 +434,7 @@ class Channel:
         self._message_delegates_nosync(msg)
 
     def _input_nosync(self, prompt: str = None,
-                      autocomplete_choices: List[str] = None) -> Optional[str]:
+                      autocomplete_choices: Union[str, List[str]] = None) -> Optional[str]:
         """
         See Channel::input.
         """
@@ -504,7 +505,8 @@ class Channel:
         with self._wait_in_line():
             self._output_nosync(msg)
 
-    def input(self, prompt: str = None, autocomplete_choices: List[str] = None) -> Optional[str]:
+    def input(self, prompt: str = None,
+              autocomplete_choices: Union[str, List[str]] = None) -> Optional[str]:
         """
         Ask the user for a line of input. It is better to specify a "prompt" here, rather than
         printing the prompt message without a trailing newline and then calling this method (the
@@ -513,6 +515,9 @@ class Channel:
 
         :param prompt: The message to prompt the user with.
         :param autocomplete_choices: A list of choices to use for autocompletion (if implemented).
+            If there is only one autocomplete choice, then that can be specified directly instead
+            of using a list with a single element (this may cause different behavior depending on
+            the implementation).
         :return: The text entered by the user, without a trailing newline, or None if they
             cancelled.
         """
@@ -714,15 +719,19 @@ class CLIChannel(Channel):
         else:
             self._readline_completer = None
 
-    def _set_options(self, options: Optional[List[str]]) -> None:
+    def _set_options(self, options: Union[str, List[str], None]) -> None:
         if self._readline_completer:
-            self._readline_completer.set_options(options)
+            if isinstance(options, str):
+                self._readline_completer.set_single_option(options)
+            else:
+                self._readline_completer.set_options(options)
 
     def _out(self, msg: Msg) -> None:
         print(self._msg_to_string(msg), end="")
         sys.stdout.flush()
 
-    def _in(self, prompt_msg: Msg = None, autocomplete_choices: List[str] = None) -> Optional[str]:
+    def _in(self, prompt_msg: Msg = None,
+            autocomplete_choices: Union[str, List[str]] = None) -> Optional[str]:
         if autocomplete_choices is not None:
             self._set_options(autocomplete_choices)
 
