@@ -333,11 +333,18 @@ class Channel:
     written to whenever the original instance outputs something (or to echo back user input).
     """
 
+    class ChannelStateError(Exception):
+        """
+        Exception raised when a thread tries to call a Channel method in an invalid way.
+        """
+        pass
+
     def __init__(self, *delegates: Log) -> None:
         self._delegates = set(delegates)
         self._lock = threading.Lock()
         self._cv = threading.Condition(self._lock)
         self._line = []  # type: List[threading.Thread]
+        self._current_thread = None  # type: Optional[threading.Thread]
         self._closed = False
 
     def _out(self, msg: Msg) -> None:
@@ -375,16 +382,24 @@ class Channel:
     @contextlib.contextmanager
     def _wait_in_line(self) -> Generator[None, None, None]:
         me = threading.current_thread()
+        if me == self._current_thread:
+            raise Channel.ChannelStateError(
+                "The current thread already has a blocking lock on all I/O! Did you call a "
+                "Channel method from within a blocking_io context? (See the Channel.blocking_io "
+                "docs for more.)")
         with self._lock:
             self._line.append(me)
             self._cv.wait_for(lambda: self._line[0] == me, None)
 
             assert self._line.pop(0) == me
             if self._closed:
-                raise ValueError("Channel is already closed")
-            yield
-
-            self._cv.notify_all()
+                raise Channel.ChannelStateError("Channel is already closed")
+            try:
+                self._current_thread = me
+                yield
+            finally:
+                self._current_thread = None
+                self._cv.notify_all()
 
     def add_delegate(self, *delegates: Log) -> None:
         """
@@ -549,7 +564,7 @@ class Channel:
         usage of these functions, see Channel::output, Channel::input, and Channel::prompt.
 
         WARNING: Calling the channel's normal I/O functions within the context of this function
-        will cause a deadlock.
+        will raise a ChannelStateError!
         """
         with self._wait_in_line():
             yield (self._output_nosync, self._input_nosync, self._prompt_nosync)
