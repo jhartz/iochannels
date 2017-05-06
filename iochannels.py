@@ -162,6 +162,8 @@ class Log:
     """
 
     def __init__(self) -> None:
+        # A list of Channels that have us as a delegate
+        self.parents = []  # type: List[Channel]
         self._lock = threading.Lock()
         self._enabled = True
         self._closed = False
@@ -219,6 +221,8 @@ class Log:
                 self._flush()
                 self._close()
                 self.close_timestamp = time.time()
+                for parent in self.parents:
+                    parent.remove_delegate(self)
 
     def pause_logging(self) -> None:
         """
@@ -409,6 +413,13 @@ class Channel:
         """
         with self._wait_in_line():
             self._delegates |= set(delegates)
+
+    def remove_delegate(self, *delegates: Log) -> None:
+        """
+        Remove one or more delegates from this channel.
+        """
+        with self._wait_in_line():
+            self._delegates -= set(delegates)
 
     def close(self) -> None:
         """
