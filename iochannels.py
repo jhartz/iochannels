@@ -170,6 +170,34 @@ class Log:
         self.open_timestamp = time.time()  # type: float
         self.close_timestamp = None  # type: Optional[float]
 
+    def __getstate__(self) -> dict:
+        """
+        Get the persistent state for this Log so it can be pickled safely. Subclasses should extend
+        this dict with any properties that they care about.
+
+        The Log does not need to be functional after restoration from this state (it will be closed
+        and immutable).
+        """
+        return {
+            "enabled": self._enabled,
+            "open_timestamp": self.open_timestamp,
+            "close_timestamp": self.close_timestamp or time.time()
+        }
+
+    def __setstate__(self, state: dict) -> None:
+        """
+        Set any persistent state saved from a call to the __getstate__ method. Subclasses should
+        extend this to restore any properties that they save in an extension of __getstate__.
+
+        After restoration, the log should not be functional; rather, it will be closed and
+        immutable.
+        """
+        self.__init__()
+        self._enabled = state["enabled"]
+        self._closed = True
+        self.open_timestamp = state["open_timestamp"]
+        self.close_timestamp = state["close_timestamp"]
+
     def _write(self, msg: Msg) -> None:
         """
         See Log::output. This method should be overridden in subclasses to do the actual output
@@ -266,6 +294,17 @@ class MemoryLog(Log):
         super().__init__()
         self._part_processor = part_processor
         self._content = ""
+
+    def __getstate__(self) -> dict:
+        state = super().__getstate__()
+        state["content"] = self._content
+        # When we read this state back, we won't be able to write to the log anymore,
+        # so there's no point storing the part_processor function.
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        super().__setstate__(state)
+        self._content = state["content"]
 
     def _write(self, msg: Msg) -> None:
         self._content += msg.get_string(self._part_processor)
