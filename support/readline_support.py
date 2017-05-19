@@ -10,7 +10,7 @@ Author: Jake Hartz <jake@hartz.io>
 """
 
 import atexit
-from typing import Callable, List, Optional, cast
+from typing import Callable, List, Optional, Sequence, cast
 
 
 class InputCompleter:
@@ -35,7 +35,7 @@ class InputCompleter:
 
         self.single_option = None  # type: Optional[str]
 
-    def set_options(self, options: Optional[List[str]]) -> None:
+    def set_options(self, options: Optional[Sequence[str]]) -> None:
         self.options = options
         self.matches = None
 

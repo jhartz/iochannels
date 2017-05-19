@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 from enum import Enum
-from typing import Callable, Generator, List, Optional, Sized, TextIO, Tuple, Union
+from typing import Callable, Generator, List, Optional, Sequence, Sized, TextIO, Tuple, Union
 
 
 DEFAULT_BAD_CHOICE_MSG = "Invalid choice: {}"
@@ -398,7 +398,7 @@ class Channel:
         raise NotImplementedError()
 
     def _in(self, prompt_msg: Msg = None,
-            autocomplete_choices: Union[str, List[str]] = None) -> Optional[str]:
+            autocomplete_choices: Union[str, Sequence[str]] = None) -> Optional[str]:
         """
         See Channel::input. This method should be overridden in subclasses to do the actual input
         operation.
@@ -484,7 +484,7 @@ class Channel:
         self._message_delegates_nosync(msg)
 
     def _input_nosync(self, prompt: str = None,
-                      autocomplete_choices: Union[str, List[str]] = None) -> Optional[str]:
+                      autocomplete_choices: Union[str, Sequence[str]] = None) -> Optional[str]:
         """
         See Channel::input.
         """
@@ -499,8 +499,8 @@ class Channel:
             self._message_delegates_nosync(Msg().add(Msg.PartType.PROMPT_ANSWER, line))
         return line
 
-    def _prompt_nosync(self, prompt: str, choices: List[str], default_choice: str = None,
-                       show_choices: bool = True, hidden_choices: List[str] = None,
+    def _prompt_nosync(self, prompt: str, choices: Sequence[str], default_choice: str = None,
+                       show_choices: bool = True, hidden_choices: Sequence[str] = None,
                        bad_choice_msg: str = DEFAULT_BAD_CHOICE_MSG,
                        empty_choice_msg: str = DEFAULT_EMPTY_CHOICE_MSG) -> str:
         """
@@ -556,7 +556,7 @@ class Channel:
             self._output_nosync(msg)
 
     def input(self, prompt: str = None,
-              autocomplete_choices: Union[str, List[str]] = None) -> Optional[str]:
+              autocomplete_choices: Union[str, Sequence[str]] = None) -> Optional[str]:
         """
         Ask the user for a line of input. It is better to specify a "prompt" here, rather than
         printing the prompt message without a trailing newline and then calling this method (the
@@ -574,8 +574,8 @@ class Channel:
         with self._wait_in_line():
             return self._input_nosync(prompt, autocomplete_choices)
 
-    def prompt(self, prompt: str, choices: List[str], default_choice: str = None,
-               show_choices: bool = True, hidden_choices: List[str] = None,
+    def prompt(self, prompt: str, choices: Sequence[str], default_choice: str = None,
+               show_choices: bool = True, hidden_choices: Sequence[str] = None,
                bad_choice_msg: str = DEFAULT_BAD_CHOICE_MSG,
                empty_choice_msg: str = DEFAULT_EMPTY_CHOICE_MSG) -> str:
         """
@@ -602,9 +602,18 @@ class Channel:
 
     @contextlib.contextmanager
     def blocking_io(self) -> Generator[Tuple[
-                Callable[[Msg], None],
-                Callable[[Optional[str], Optional[List[str]]], Optional[str]],
-                Callable[[str, List[str], Optional[str], bool, Optional[List[str]], str, str], str]
+                Callable[
+                    [Msg],
+                    None
+                ],
+                Callable[
+                    [Optional[str], Optional[Union[str, Sequence[str]]]],
+                    Optional[str]
+                ],
+                Callable[
+                    [str, Sequence[str], Optional[str], bool, Optional[Sequence[str]], str, str],
+                    str
+                ]
             ], None, None]:
         """
         Block all synchronous I/O, only allowing input and output in one place. This is useful if
@@ -624,7 +633,7 @@ class Channel:
         with self._wait_in_line():
             yield (self._output_nosync, self._input_nosync, self._prompt_nosync)
 
-    def output_list(self, msgs: List[Msg], prefix: str = "  ") -> None:
+    def output_list(self, msgs: Sequence[Msg], prefix: str = "  ") -> None:
         """
         Print a list of messages to the user. We will try to organize them in columns, similar to
         the "ls" command. If any of the messages contains a newline character, then they ruin it
@@ -769,7 +778,7 @@ class CLIChannel(Channel):
         else:
             self._readline_completer = None
 
-    def _set_options(self, options: Union[str, List[str], None]) -> None:
+    def _set_options(self, options: Union[str, Sequence[str], None]) -> None:
         if self._readline_completer:
             if isinstance(options, str):
                 self._readline_completer.set_single_option(options)
@@ -781,7 +790,7 @@ class CLIChannel(Channel):
         sys.stdout.flush()
 
     def _in(self, prompt_msg: Msg = None,
-            autocomplete_choices: Union[str, List[str]] = None) -> Optional[str]:
+            autocomplete_choices: Union[str, Sequence[str]] = None) -> Optional[str]:
         if autocomplete_choices is not None:
             self._set_options(autocomplete_choices)
 
