@@ -852,6 +852,13 @@ class ColorCLIChannel(CLIChannel):
                 Msg.PartType.BG_SAD:   lambda s: self._wrap_bg_color("RED", s),
                 Msg.PartType.BG_MEH:   lambda s: self._wrap_bg_color("BLUE", s)
             }
+
+            # There's an issue with colorama on Windows (since Python 3.5) where it won't color
+            # properly when using the input() function:
+            # https://github.com/tartley/colorama/issues/103
+            # So, until that's fixed, we won't color prompt questions.
+            if colorama_support.is_colorama_on_windows:
+                self._transforms_by_part_type[Msg.PartType.PROMPT_QUESTION] = lambda s: s
         else:
             # The default functionality will just fall back to boring ol' black-and-white
             self.print()
